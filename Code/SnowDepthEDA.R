@@ -2,6 +2,7 @@
 
 library(raster)
 library(rgdal)
+library(tidyverse)
 #WGS_1984_UTM_Zone_11N
 #WKID: 32611 Authority: EPSG
 
@@ -9,15 +10,17 @@ snow_test <- raster("../Large Files/Snow Data/ASO 2014/MB20140406_SUPERsnow_dept
 
 pct_canopy <- raster("../Large Files/YNP_Illilouette2011/jts/Raster/Cover_aligned/e4101.tif")
 
-hist(snow_test)
-
+dem <- raster("../Large Files/GIS/Topo/DEM.tif")
 
 snow_crop <- raster::crop(snow_test,round(extent(pct_canopy)*0.9)) #0.9 adjusts for tilt in reprojection.
 canopy_crop <- raster::crop(pct_canopy,round(extent(pct_canopy)*0.9))
+dem_crop <- raster::crop(dem,round(extent(pct_canopy)*0.9))
 
 plot(snow_crop)
 plot(canopy_crop)
+plot(dem_crop)
 
+####1. Adjust for unreliable snow depths####
 #Determine breakpoint for snow depth values, above which they are unreliable
 graphics::hist(getValues(snow_crop),breaks=40)
 
@@ -39,4 +42,45 @@ for(e in 1:length(vct)){
     }
   }
 }
+#Cutting at 1.4 m
 
+new.v <- v
+new.v[which(new.v>1.4)]=NA
+snow_crop2 <- setValues(snow_crop,new.v)
+plot(snow_crop2)
+
+####2. Sample 3m landscape####
+#START HERE; control for elevation in these figures and subsequent analyses.
+#2a: Depth ~ CC
+samples <- sample(x=c(1:length(new.v)), size= 1000, replace=F)
+df <- data.frame(sample.ID=samples)
+df$depth <- snow_crop2[samples]
+df$CC <- canopy_crop[samples]
+
+ggplot(df,aes(x=CC,y=depth))+
+  geom_point()+
+  geom_smooth()+
+  labs(title="04-06-2014")
+
+#2b: Depth ~ Distance to forest
+binary.v <- getValues(canopy_crop)
+binary.v[binary.v<0.25] <- NA
+binary.v[!is.na(binary.v)] <- 1
+canopy_crop_binary <- setValues(canopy_crop,binary.v)
+canopy_crop_distance <- distance(canopy_crop_binary)
+plot(canopy_crop_distance)
+
+#samples.open <- sample(x=df[df$CC<0.2,"sample.ID"]) #Deprecate
+which(!is.na(getValues(canopy_crop_binary)))
+samples.open <- sample(x=which(is.na(getValues(canopy_crop_binary))), 
+                  size= 1000, replace=F)
+df <- data.frame(sample.ID=samples.open)
+df$depth <- snow_crop2[samples.open]
+df$CC <- canopy_crop[samples.open]
+df$distance_to_edge <- canopy_crop_distance[samples.open]
+
+ggplot(df,aes(x=distance_to_edge,y=depth))+
+  geom_point()+
+  geom_smooth()+
+  #xlim(c(0,20))+
+  labs(title="04-06-2014; Open areas only")
